@@ -20,25 +20,24 @@ chrome.commands.onCommand.addListener((command) => {
 // Switch to the most recently used tab by querying Chrome directly
 async function switchToMostRecentTab() {
   try {
-    // Get all tabs
-    const tabs = await chrome.tabs.query({});
-    
-    if (tabs.length < 2) {
-      // console.log('Not enough tabs to switch');
-      return;
-    }
-    
-    // Get current active tab
-    const currentTab = tabs.find(tab => tab.active);
-    if (!currentTab) {
+    // Get the currently active tab in the focused window.
+    const [currentTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!currentTab || currentTab.windowId == null) {
       // console.log('No active tab found');
       return;
     }
-    
-    // console.log('Current tab:', currentTab.id, 'Total tabs:', tabs.length);
-    
+
+    // Only consider tabs from the current window.
+    const tabsInCurrentWindow = await chrome.tabs.query({ windowId: currentTab.windowId });
+    if (tabsInCurrentWindow.length < 2) {
+      // console.log('Not enough tabs to switch');
+      return;
+    }
+
+    // console.log('Current tab:', currentTab.id, 'Total tabs in window:', tabsInCurrentWindow.length);
+
     // Sort tabs by lastAccessed timestamp (most recent first)
-    const sortedTabs = tabs
+    const sortedTabs = tabsInCurrentWindow
       .filter(tab => tab.type !== 'popup') // Filter out popup windows
       .sort((a, b) => {
         // Convert lastAccessed to Date objects for comparison

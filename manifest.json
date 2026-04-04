@@ -19,15 +19,29 @@
       "128": "icon128.png"
     }
   },
-          "commands": {
-          "_execute_action": {
-            "suggested_key": {
-              "default": "Alt+Z",
-              "mac": "Alt+Z"
-            },
-            "description": "Switch to most recent tab"
-          }
-        },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Z",
+        "mac": "Alt+Z"
+      },
+      "description": "Switch to more recent tab"
+    },
+    "walk_down": {
+      "suggested_key": {
+        "default": "Alt+Shift+Z",
+        "mac": "Alt+Shift+Z"
+      },
+      "description": "Walk down MRU stack"
+    },
+    "walk_up": {
+      "suggested_key": {
+        "default": "Alt+Shift+X",
+        "mac": "Alt+Shift+X"
+      },
+      "description": "Walk up MRU stack"
+    }
+  },
   
 
   "icons": {

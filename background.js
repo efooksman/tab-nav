@@ -1,69 +1,106 @@
-// Extension initialization
-// console.log('Tab Navigator extension loaded');
+// MRU tab stack per window: Map<windowId, tabId[]>
+// Most recently used tab is at the front (index 0).
+const mruStacks = new Map();
 
-// Handle action button click
-chrome.action.onClicked.addListener((tab) => {
-  // console.log('Action button clicked');
-  switchToMostRecentTab();
+// --- MRU stack maintenance ---
+
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  pushToFront(windowId, tabId);
+  // Any non-walk activation resets the walk state
+  if (!inWalkSwitch) walkIndex = 0;
 });
 
-// Handle keyboard command
-chrome.commands.onCommand.addListener((command) => {
-  // console.log('Command received:', command);
-  if (command === '_execute_action') {
-    // console.log('Alt+Z command triggered at', new Date().toISOString());
-    switchToMostRecentTab();
+chrome.tabs.onRemoved.addListener((tabId, { windowId }) => {
+  const stack = mruStacks.get(windowId);
+  if (stack) {
+    const idx = stack.indexOf(tabId);
+    if (idx !== -1) stack.splice(idx, 1);
   }
 });
 
-// Switch to the most recently used tab by querying Chrome directly
-async function switchToMostRecentTab() {
+chrome.windows.onRemoved.addListener((windowId) => {
+  mruStacks.delete(windowId);
+});
+
+function pushToFront(windowId, tabId) {
+  let stack = mruStacks.get(windowId);
+  if (!stack) {
+    stack = [];
+    mruStacks.set(windowId, stack);
+  }
+  const idx = stack.indexOf(tabId);
+  if (idx !== -1) stack.splice(idx, 1);
+  stack.unshift(tabId);
+}
+
+// Initialize stacks for existing windows/tabs on install/startup
+async function initStacks() {
+  const windows = await chrome.windows.getAll({ populate: true });
+  for (const win of windows) {
+    const sorted = win.tabs
+      .filter(t => t.type !== 'popup')
+      .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    mruStacks.set(win.id, sorted.map(t => t.id));
+  }
+}
+initStacks();
+
+// --- Tab switching ---
+
+// Alt+Z: toggle between the two most recent tabs
+chrome.action.onClicked.addListener(() => {
+  toggleLastTwo();
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === '_execute_action') {
+    toggleLastTwo();
+  } else if (command === 'walk_down') {
+    walkStack(1);
+  } else if (command === 'walk_up') {
+    walkStack(-1);
+  }
+});
+
+async function toggleLastTwo() {
   try {
-    // Get the currently active tab in the focused window.
+    walkIndex = 0;
     const [currentTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (!currentTab || currentTab.windowId == null) {
-      // console.log('No active tab found');
-      return;
-    }
+    if (!currentTab) return;
 
-    // Only consider tabs from the current window.
-    const tabsInCurrentWindow = await chrome.tabs.query({ windowId: currentTab.windowId });
-    if (tabsInCurrentWindow.length < 2) {
-      // console.log('Not enough tabs to switch');
-      return;
-    }
+    const stack = mruStacks.get(currentTab.windowId);
+    if (!stack || stack.length < 2) return;
 
-    // console.log('Current tab:', currentTab.id, 'Total tabs in window:', tabsInCurrentWindow.length);
-
-    // Sort tabs by lastAccessed timestamp (most recent first)
-    const sortedTabs = tabsInCurrentWindow
-      .filter(tab => tab.type !== 'popup')
-      .sort((a, b) => {
-        const timeA = new Date(a.lastAccessed || 0);
-        const timeB = new Date(b.lastAccessed || 0);
-        return timeB - timeA;
-      });
-
-    // console.log('Sorted tabs by lastAccessed:', sortedTabs.map(t => ({ id: t.id, title: t.title, lastAccessed: t.lastAccessed })));
-
-    // Find the most recently used tab that's not the current one
-    let mostRecentTab = null;
-    for (const tab of sortedTabs) {
-      if (tab.id !== currentTab.id) {
-        mostRecentTab = tab;
-        break;
-      }
-    }
-
-    if (mostRecentTab) {
-      // console.log('Switching to most recent tab:', mostRecentTab.id, 'Title:', mostRecentTab.title);
-      await chrome.tabs.update(mostRecentTab.id, { active: true });
-    } else {
-      // console.log('No recent tabs to switch to');
-    }
+    await chrome.tabs.update(stack[1], { active: true });
   } catch (error) {
-    // console.error('Error switching tabs:', error);
+    // console.error('Error toggling tabs:', error);
   }
 }
 
- 
+// Walk state: tracks position in the MRU stack during walk sessions.
+// walkIndex 0 = origin tab (stack[0]). First press goes to stack[1].
+let walkIndex = 0;
+let inWalkSwitch = false;
+
+// Shift+Alt+Z (direction=1): walk down (deeper into history)
+// Ctrl+Alt+Z (direction=-1): walk back up (toward more recent)
+async function walkStack(direction) {
+  try {
+    const [currentTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!currentTab) return;
+
+    const stack = mruStacks.get(currentTab.windowId);
+    if (!stack || stack.length < 2) return;
+
+    const newIndex = walkIndex + direction;
+    if (newIndex < 1 || newIndex >= stack.length) return;
+
+    walkIndex = newIndex;
+
+    inWalkSwitch = true;
+    await chrome.tabs.update(stack[walkIndex], { active: true });
+    inWalkSwitch = false;
+  } catch (error) {
+    // console.error('Error walking stack:', error);
+  }
+}
